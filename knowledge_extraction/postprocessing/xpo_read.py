@@ -1,6 +1,7 @@
 import ujson as json
 from collections import defaultdict
 import os
+import re
 
 def format_type(raw_type):
     type_formatted = raw_type.lower().replace('.unspecified', '')
@@ -10,8 +11,6 @@ def format_type(raw_type):
                 'movement.transportartifact', 'movement.transportation'
             ).replace(
                 'transaction.transfermoney','transaction.exchangebuysell'
-            ).replace(
-                'transaction.transferownership','transaction.exchangebuysell'
             ).replace(
                 'transaction.transferownership','transaction.exchangebuysell'
             ).replace(
@@ -33,7 +32,7 @@ def format_type(raw_type):
             ).replace(
                 'life.injure.illnessdegredationsickness', 'life.illness'
             ).replace(
-                'business.declarebankruptcy', 'artifactExistence.damagedestroydisabledismantle'
+                'business.declarebankruptcy', 'artifactexistence.damagedestroydisabledismantle'
             ).replace(
                 'personnel.nominate', 'personnel.elect'
             ).replace(
@@ -42,6 +41,10 @@ def format_type(raw_type):
                 'business.merge', 'government.formation.mergegpe'
             ).replace(
                 'disaster.accidentcrash.accidentcrash', 'disaster.crash'
+            ).replace(
+                'artifactexistence.damagedestroy', 'artifactexistence.damagedestroydisabledismantle'
+            ).replace(
+                'disabledismantledisabledismantle', 'disabledismantle'
             )
     if 'life.marry' in type_formatted or 'life.beborn' in type_formatted or 'life.divorce' in type_formatted:
         return None
@@ -49,62 +52,124 @@ def format_type(raw_type):
 
 def format_role(raw_role):
     role_formatted = raw_role.replace(
-            'Participant', 'Communicator_ParticipantArg1'
+            ' Participant ', 'Communicator_ParticipantArg1'
         ).replace(
-            'Agent', 'Transporter_Killer_AgentWhoIsSanitizing_Jailer_Founder_Executioner_JudgeCourt_Injurer'
+            ' Agent ', 'A0_Victim_Transporter_Killer_AgentWhoIsSanitizing_Jailer_Founder_Executioner_JudgeCourt_Injurer_Extraditer'
         ).replace(
-            'Artifact', 'PassengerArtifact'
+            ' Artifact ', 'PassengerArtifact_A1'
         ).replace(
-            'Thing', 'AcquiredEntity_ThingPrevented'
+            ' Thing ', 'A1'
         ).replace(
-            'Broadcaster', 'Communicator'
+            ' Broadcaster ', 'Communicator_A0'
         ).replace(
-            'Person', 'PassengerArtifact_Employee_Detainee_Defendant'
+            ' Communicator ', 'A0'
         ).replace(
-            'Organization', 'PlaceOfEmployment_GPE_Artifact_ParticipantArg2'
+            ' Person ', 'PassengerArtifact_Employee_Detainee_Defendant'
         ).replace(
-            'Manufacturer', 'ManufacturerAssembler'
+            ' Organization ', 'PlaceOfEmployment_GPE_Artifact_ParticipantArg2'
         ).replace(
-            'Assessed', 'ThingAssessed'
+            ' Manufacturer ', 'ManufacturerAssembler'
         ).replace(
-            'Treater', 'Healer'
+            ' Assessed ', 'ThingAssessed'
         ).replace(
-            'Washer', 'WasherWhoIsWashing'
+            ' Treater ', 'Healer_A0'
         ).replace(
-            'Audience', 'Recipient'
+            ' Washer ', 'WasherWhoIsWashing'
         ).replace(
-            'Created', 'ThingCreated'
+            ' Audience ', 'Recipient'
         ).replace(
-            'Elector', 'Voter'
+            ' Created ', 'ThingCreated'
         ).replace(
-            'Elect', 'Voter'
+            ' Elector ', 'Voter'
         ).replace(
-            'Instrument', 'Vehicle_MedicalIssue'
+            ' Elect ', 'Voter'
         ).replace(
-            'Mutating', 'ThingMutating'
+            ' Instrument ', 'Vehicle_MedicalIssue'
         ).replace(
-            'worn', 'ThingWorn'
+            ' Mutating ', 'ThingMutating'
         ).replace(
-            'object', 'SanitizedObject'
+            ' worn ', 'ThingWorn'
         ).replace(
-            'Adjudicator', 'Prosecutor_JudgeCourt'
+            ' object ', 'SanitizedObject'
         ).replace(
-            'Plaintiff', 'Defendant'
+            ' Adjudicator ', 'Prosecutor_JudgeCourt'
         ).replace(
-            'Contaminated', 'ThingContaminated'
+            ' Plaintiff ', 'Defendant'
         ).replace(
-            'Prosecutor', 'JudgeCourt'
+            ' Contaminated ', 'ThingContaminated'
         ).replace(
-            'Washed', 'ThingWashed'
+            ' Prosecutor ', 'JudgeCourt'
         ).replace(
-            'Creator', 'ManufacturerAssembler'
+            ' Washed ', 'ThingWashed'
         ).replace(
-            'Nominee', 'Candidate'
+            ' Creator ', 'ManufacturerAssembler'
         ).replace(
-            'Nominator', 'Voter'
+            ' Nominee ', 'Candidate'
         ).replace(
-            'Material', 'ComponentsMaterials'
+            ' Nominator ', 'Voter'
+        ).replace(
+            ' Material ', 'ComponentsMaterials'
+        ).replace(
+            ' PreviousPosition ', 'Position_A1'
+        ).replace(
+            ' distributor ', 'A0'
+        # ).replace(
+        #     ' to ', 'A1'
+        ).replace(
+            ' Attacker ', 'A0_AM'
+        ).replace(
+            ' Target ', 'A1'
+        ).replace(
+            ' Employee ', 'A1'
+        ).replace(
+            ' CleanerWhoIsCleaning ', 'AgentWhoIsSanitizing'
+        ).replace(
+            ' Patient ', 'A1'
+        ).replace(
+            ' MedicalIssue ', 'ThingPrevented_A2'
+        ).replace(
+            ' ThingPrevented ', 'MedicalIssue_A2'
+        ).replace(
+            ' InstrumentTreatment ', 'A3_AM'
+        ).replace(
+            ' Affliction ', 'ThingPrevented'
+        ).replace(
+            ' Treater ', 'A0'
+        ).replace(
+            ' InfectingAgent ', 'Victim_A2'
+        ).replace(
+            ' Giver ', 'A0'
+        ).replace(
+            ' ThingAssessedFor ', 'ThingAssessed'
+        ).replace(
+            ' ThingAssessed ', 'A1'
+        ).replace(
+            ' BodyLocation ', 'Place'
+        ).replace(
+            ' Topic ', 'A1'
+        ).replace(
+            ' ParticipantArg1 ', 'A0'
+        ).replace(
+            ' ParticipantArg2 ', 'A1'
+        ).replace(
+            ' SymptomSign ', 'MedicalCondition'
+        ).replace(
+            ' Victim ', 'A1'
+        ).replace(
+            ' ArtifactMoney ', 'AcquiredEntity'
+        ).replace(
+            ' SanitizedObject ', 'A1'
+        ).replace(
+            ' Preventer ', 'A0'
+        ).replace(
+            ' Healer ', 'A0'
+        ).replace(
+            ' Recipient ', 'A2'
+        ).replace(
+            ' IdentifiedObject ', 'Disease_A2'
         )
+
+        # ThingAssessedFor
     return role_formatted
 
 def format_relation(rel_type):
@@ -147,25 +212,47 @@ def format_relation(rel_type):
     ).replace(
         'OrganizationAffiliation.Founder',
         'OrganizationAffiliation.Founder.Founder'
+    ).replace(
+        'OPRA',
+        'OrganizationPoliticalReligiousAffiliation'
     )
     return rel_formatted
 
 def load_xpo(xpo_json):
     xpo_data = json.load(open(xpo_json))
     ontology_json = defaultdict(lambda : defaultdict(lambda : defaultdict()))
+    qnode_name_dict = defaultdict(lambda : defaultdict())
     for Qnode in xpo_data['events']:
         qnode_id = xpo_data['events'][Qnode]['wd_qnode'] if 'wd_qnode' in xpo_data['events'][Qnode] else xpo_data['events'][Qnode]['wd_pnode']
-        if 'ldc_types' not in xpo_data['events'][Qnode]:
-            continue
-        for LDC_type in xpo_data['events'][Qnode]['ldc_types']:
-            ldc_type_name = format_type(LDC_type['name']).replace('justice.arrestjaildetaindetain', 'justice.arrestjaildetain')
-            ldc_type_name_subtype = ldc_type_name.split('.')[-1]
-            ontology_json['event'][ldc_type_name]['qnode'] = qnode_id
-            ontology_json['event_subtype'][ldc_type_name_subtype]['qnode'] = qnode_id
-            if 'ldc_arguments' in LDC_type:
-                for LDC_arg in LDC_type['ldc_arguments']:
-                    ldc_arg_name = LDC_arg['ldc_name'].strip()
-                    ontology_json['event_arg'][qnode_id][ldc_arg_name] = LDC_arg['dwd_arg_name']
+        
+        if 'ldc_types' in xpo_data['events'][Qnode]:
+            qnode_name = xpo_data['events'][Qnode]["name"]
+            qnode_name_dict['event'][qnode_name] = qnode_id
+            for LDC_type in xpo_data['events'][Qnode]['ldc_types']:
+                ldc_type_name = format_type(LDC_type['name']).replace('justice.arrestjaildetaindetain', 'justice.arrestjaildetain')
+                ldc_type_name_subtype = ldc_type_name.split('.')[-1]
+                ontology_json['event'][ldc_type_name]['qnode'] = qnode_id
+                ontology_json['event_subtype'][ldc_type_name_subtype]['qnode'] = qnode_id
+                if 'ldc_arguments' in LDC_type:
+                    for LDC_arg in LDC_type['ldc_arguments']:
+                        ldc_arg_name = LDC_arg['ldc_name'].strip()
+                        if LDC_arg['dwd_arg_name'] is not None:
+                            ontology_json['event_arg'][qnode_id][ldc_arg_name] = LDC_arg['dwd_arg_name']
+                            # print(LDC_arg['dwd_arg_name'])
+                            ontology_json['event_arg'][qnode_id][LDC_arg['dwd_arg_name'][:2]] = LDC_arg['dwd_arg_name']
+        else:
+            # if qnode_id == 'Q169872':
+            #     print(qnode_id, xpo_data['events'][Qnode]["arguments"])
+            if len(xpo_data['events'][Qnode]["arguments"]) > 0:
+                qnode_name = xpo_data['events'][Qnode]["name"]
+                qnode_name_dict['event'][qnode_name] = qnode_id
+                for role_dict in xpo_data['events'][Qnode]["arguments"]:
+                    role_name = role_dict['name']
+                    ontology_json['event_arg'][qnode_id][role_name[:2]] = role_name
+    ontology_json['event_arg']["Q989018"]["distributor"] = 'A0_pag_distributor'
+    ontology_json['event_arg']["Q989018"]["to"] = 'A2_gol_distributed_to'
+    ontology_json['event_arg']["Q989018"]["distributed"] = 'A1_ppt_thing_distributed'
+    ontology_json['event_arg']["Q989018"]["distributed"] = 'A1_ppt_thing_distributed'
         # break
     # print(ontology_json['event'])
     # ontology_json['event']['life.beborn']['qnode'] = 
@@ -174,6 +261,8 @@ def load_xpo(xpo_json):
     
     for Qnode in xpo_data['relations']:
         qnode_id = xpo_data['relations'][Qnode]['wd_qnode'] if 'wd_qnode' in xpo_data['relations'][Qnode] else xpo_data['relations'][Qnode]['wd_pnode']
+        qnode_name = xpo_data['relations'][Qnode]["name"]
+        qnode_name_dict['relation'][qnode_name] = qnode_id
         for LDC_type in xpo_data['relations'][Qnode]['ldc_types']:
             ldc_type_name = LDC_type['name'].replace('.Unspecified', '')
             ontology_json['relation'][ldc_type_name]['qnode'] = qnode_id
@@ -188,6 +277,8 @@ def load_xpo(xpo_json):
 
     for Qnode in xpo_data['entities']:
         qnode_id = xpo_data['entities'][Qnode]['wd_qnode'] if 'wd_qnode' in xpo_data['entities'][Qnode] else xpo_data['entities'][Qnode]['wd_pnode']
+        qnode_name = xpo_data['entities'][Qnode]["name"]
+        qnode_name_dict['entity'][qnode_name] = qnode_id
         for LDC_type in xpo_data['entities'][Qnode]['ldc_types']:
             ldc_type_name = LDC_type['name'].replace('.Unspecified', '')
             ontology_json['entity'][ldc_type_name] = qnode_id
@@ -196,8 +287,9 @@ def load_xpo(xpo_json):
             #     ontology_json['relation_args'][ldc_type_name+'_'+ldc_arg_name]['qnode'] = qnode_id
         # break
 
+    # print(qnode_name_dict)
     
-    return ontology_json
+    return ontology_json, qnode_name_dict
 
 def xpo2tab(xpo_json, output_tab_dir):
     xpo_data = json.load(open(xpo_json))

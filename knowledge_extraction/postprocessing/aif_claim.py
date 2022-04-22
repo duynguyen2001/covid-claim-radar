@@ -26,7 +26,11 @@ from postprocessing_extract_source import extract_source
 import numpy as np
 import base64
 from postprocessing_rename_turtle import load_doc_root_mapping
-from qnode_overlay import load_xpo, format_type, format_role, format_relation, template
+from xpo_read import load_xpo, format_type, format_role, format_relation, template
+
+
+topic_type_map = {
+}
 
 def load_freebase(freebase_tab, edl_cs):
     # freebase_tab
@@ -145,14 +149,14 @@ def transoffset_mapping(doc_id, start, end, translation_mapping):
         
         for trans_start in translation_mapping[doc_id]:
             for trans_end in translation_mapping[doc_id][trans_start]:
-                if start+1 >= int(trans_start) and end-1 <= int(trans_end):
+                if start+2 >= int(trans_start) and end-2 <= int(trans_end):
                     new_start = translation_mapping[doc_id][trans_start][trans_end][0]
                     new_end = translation_mapping[doc_id][trans_start][trans_end][1]
                     break
             if new_start != -1:
                 break
         if new_start == -1:
-            print('No translation mapping', start, end)
+            print('No translation mapping', doc_id, start, end)
             for trans_start in translation_mapping[doc_id]:
                 for trans_end in translation_mapping[doc_id][trans_start]:
                     if end <= int(trans_end):
@@ -263,7 +267,7 @@ def get_str_from_ltf(doc_id, start, end, ltf_dir):
         return '[ERROR]NoLTF %s' % doc_id
     tree = ET.parse(ltf_file_path)
     root = tree.getroot()
-    valid = False
+    # valid = False
     for doc in root:
         for text in doc:
             for seg in text:
@@ -271,19 +275,26 @@ def get_str_from_ltf(doc_id, start, end, ltf_dir):
                     if token.tag == "TOKEN":
                         token_beg = int(token.attrib["start_char"])
                         token_end = int(token.attrib["end_char"])
-                        # if start <= token_beg and end >= token_end:
-                        #     tokens.append(token.text)
-                        if start == token_beg:
-                            valid = True
-                        if valid:
+                        if start <= token_beg and end >= token_end:
                             tokens.append(token.text)
-                        if end == token_end:
-                            valid = False
+                        # if start == token_beg:
+                        #     valid = True
+                        # if valid:
+                        #     tokens.append(token.text)
+                        # if end == token_end:
+                        #     valid = False
     if len(tokens) > 0:
         return ' '.join(tokens)
     else:
         print('[ERROR]can not find the string with offset ', doc_id, start, end)
-        return None
+        # return None
+        return get_str_from_rsd(doc_id, start, end, ltf_dir.replace('ltf', 'rsd'))
+
+def get_str_from_rsd(doc_id, start, end, rsd_dir):
+    rsd_file_path = os.path.join(rsd_dir, doc_id + '.rsd.txt')
+    if os.path.exists(rsd_file_path):
+        rsd_content = open(rsd_file_path).read()
+        return rsd_content[start:end+1].replace('\n',' ')
 
 def get_context(docid, start, end, ltf_dir):
 
@@ -308,6 +319,99 @@ def get_context(docid, start, end, ltf_dir):
                 # if len(tokens) > 0:
                 #     return tokens
     return sentence
+
+def get_context_sentences(docid, start, end, ltf_dir):
+     # tokens = []
+    sentence = None
+
+    ltf_file_path = os.path.join(ltf_dir, docid + '.ltf.xml')
+    # print(ltf_file_path)
+    # print(start, end)
+    if not os.path.exists(ltf_file_path):
+        return '[ERROR]NoLTF %s' % ltf_file_path
+    tree = ET.parse(ltf_file_path)
+    root = tree.getroot()
+    sentence_before = ""
+    sentence_after = ""
+    read_next = False
+    for doc in root:
+        for text in doc:
+            for seg in text:
+                seg_beg = int(seg.attrib["start_char"])
+                seg_end = int(seg.attrib["end_char"])
+                # print(seg_beg, start)
+                for token in seg:
+                    if token.tag == "ORIGINAL_TEXT":
+                        if read_next:
+                            for token in seg:
+                                if token.tag == "ORIGINAL_TEXT":
+                                    sentence_after = token.text
+                                    # print([sentence_before, sentence, sentence_after])
+                                    return sentence_before, sentence, sentence_after
+                        if start >= seg_beg and end <= seg_end:
+                            sentence = token.text
+                            read_next = True
+                        else:
+                            sentence_before = token.text
+                        # if len(tokens) > 0:
+                        #     return tokens
+    return sentence_before, sentence, sentence_after
+
+def get_translation(translation_json, ltf_dir, mapping_dir):
+    str_mapping = defaultdict(set)
+    translation_data = json.load(open(translation_json))
+    for offset_str in translation_data:
+        doc_id, start, end = parse_offset_str(offset_str)
+        raw_str = get_str_from_ltf(doc_id, start, end, ltf_dir)
+        for enstr_translated in translation_data[offset_str]:
+            str_mapping[enstr_translated].add(str(raw_str))
+    json.dump(str_mapping, open(os.path.join(mapping_dir,'str_trans_mapping.json'), 'w'), indent=4)
+    return str_mapping
+
+def get_translation_entity(entity_info_cs, mapping_dir):
+    # for docid in docsent_mapping_trans2raw:
+    #     for sent_beg_trans in docsent_mapping_trans2raw[docid]:
+    #         for sent_end_trans in docsent_mapping_trans2raw[docid][sent_beg_trans]:
+    #             for 
+    mentions = Counter()
+    for line in open(entity_info_cs):
+        line = line.rstrip('\n')
+        tabs = line.split('\t')
+
+        if line.startswith(':Entity'):
+            # entity_id = id_normalize(tabs[0], language)
+            # if tabs[1] == 'type':
+            #     entity_type = tabs[2].split(' ')[0].split('#')[-1].strip()
+            #     entity_type = entity_type.replace('WEA.Projectile', 'WEA.ThrownProjectile')
+            #     entity_info[entity_id]['type'] = entity_type
+            #     # # DWD
+            #     # if entity_type in ontology_data['entity']:
+            #     #     entity_type_qnode = ontology_data['entity'][entity_type]
+            #     #     entity_info[entity_id]['type_qnode'] = entity_type_qnode
+            #     # else:
+            #     #     print('wrong', entity_type, ontology_data['entity'].keys())
+                
+            if 'mention' == tabs[1]:
+                mention = tabs[2][1:-1]
+                mentions[mention] += 1
+    writer = open(os.path.join(mapping_dir, 'entity_lst.txt'), 'w')
+    for mention, num in mentions.most_common():
+        if num > 1:
+            writer.write(mention)
+            writer.write('\n')
+    writer.flush()
+    writer.close()
+
+def get_translation_mapping(name_mapping_file):
+    str_mapping = defaultdict(set)
+    for line in open(name_mapping_file):
+        line = line.rstrip('\n')
+        tabs = line.split('\t')
+        raw_str = tabs[0]
+        en_str = tabs[1]
+        if raw_str.lower() != en_str.lower():
+            str_mapping[en_str].add(raw_str)
+    return str_mapping
 
 def load_canonical_mention(tabs, info_dict, language, validate_offset):
     offset = tabs[3]
@@ -423,7 +527,7 @@ def load_source_tab(source_tab):
     return source_dict
 
 
-def load_cs(input_cs, ontology_data, language, validate_offset=False, single_type=False):
+def load_cs(input_cs, ontology_data, qnode_name_dict, language, validate_offset=False, single_type=False):
     doc_ke = defaultdict(lambda: defaultdict(set))
     entity_info = defaultdict(lambda : defaultdict())
     evt_info = defaultdict(lambda : defaultdict())
@@ -452,23 +556,9 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
                 #     print('wrong', entity_type, ontology_data['entity'].keys())
                 
             elif 'canonical_mention' in tabs[1]:
-                doc_id = load_canonical_mention(tabs, entity_info[entity_id], language, validate_offset)
+                mention_doc_id = load_canonical_mention(tabs, entity_info[entity_id], language, validate_offset)
                 # doc_ke[doc_id]['entity'].add(entity_id)
 
-                # if mention_doc_id == doc_id:
-                if tabs[1] == 'mention':
-                    if 'name' not in entity_info[entity_id]:
-                        entity_info[entity_id]['name'] = list()
-                    entity_info[entity_id]['name'].append(tabs[2][1:-1])
-                elif tabs[1] == 'nominal_mention' or tabs[1] == 'pronominal_mention':
-                    if entity_type.split('.')[0] in ['MHI', 'MON', ' RES', 'TTL', 'VAL']:
-                        if 'name' not in entity_info[entity_id]:
-                            entity_info[entity_id]['name'] = list()
-                        entity_info[entity_id]['name'].append(tabs[2][1:-1])
-            elif 'mention' in tabs[1]:
-                mention_offset = load_mention(tabs, entity_info[entity_id], validate_offset)
-                mention_doc_id, start, end = parse_offset_str(mention_offset)
-                doc_ke[mention_doc_id]['entity'].add(entity_id)
                 # if mention_doc_id == doc_id:
                 #     if tabs[1] == 'mention':
                 #         if 'name' not in entity_info[entity_id]:
@@ -479,6 +569,31 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
                 #             if 'name' not in entity_info[entity_id]:
                 #                 entity_info[entity_id]['name'] = list()
                 #             entity_info[entity_id]['name'].append(tabs[2][1:-1])
+            elif 'mention' in tabs[1]:
+                mention_offset = load_mention(tabs, entity_info[entity_id], validate_offset)
+                mention_doc_id, start, end = parse_offset_str(mention_offset)
+                doc_ke[mention_doc_id]['entity'].add(entity_id)
+                # check entity Qnodes
+                mention_str = tabs[2][1:-1].lower()
+                if mention_str in qnode_name_dict['entity']:
+                    qnode_mapped = qnode_name_dict['entity'][mention_str]
+                    if 'type_qnode' not in entity_info[entity_id]:
+                        entity_info[entity_id]['type_qnode'] = dict()
+                    entity_info[entity_id]['type_qnode'][qnode_mapped] = 1.0
+                    # print('mapped entity Qnodes', mention_str)
+                    qnode_dict[tabs[2][1:-1]]['type_qnode'][qnode_mapped] += 1
+                # if mention_doc_id == doc_id:
+                if tabs[1] == 'mention':
+                    entity_info[entity_id]['hasName'] = True
+                    # if 'name' not in entity_info[entity_id]:
+                    #     entity_info[entity_id]['name'] = list()
+                    # entity_info[entity_id]['name'].append(tabs[2][1:-1])
+                elif tabs[1] == 'nominal_mention' or tabs[1] == 'pronominal_mention':
+                    if entity_type.split('.')[0] in ['MHI', 'MON', ' RES', 'TTL', 'VAL']:
+                        # if 'name' not in entity_info[entity_id]:
+                        #     entity_info[entity_id]['name'] = list()
+                        # entity_info[entity_id]['name'].append(tabs[2][1:-1])
+                        entity_info[entity_id]['hasName'] = True
             elif 'link' == tabs[1]:
                 link_target = tabs[2].replace('NIL', 'NILQ')
                 # if link_target.startswith('NIL'):
@@ -504,7 +619,7 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
             elif 'typelink' == tabs[1]:
                 if 'type_qnode' not in entity_info[entity_id]:
                     entity_info[entity_id]['type_qnode'] = dict()
-                entity_info[entity_id]['type_qnode'][tabs[2]] = 1.0
+                entity_info[entity_id]['type_qnode'][tabs[2]] = 0.95
                 for offset in entity_info[entity_id]['mention']:
                     mention_confidence, mention_type, mention_str = entity_info[entity_id]['mention'][offset]
                     qnode_dict[mention_str]['type_qnode'][tabs[2]] += 1
@@ -515,7 +630,7 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
                 if 'Affiliation' in rel_type:
                     entity_info[entity_id]['affiliation'] = (id_normalize(tabs[2], language), tabs[3])
                 if format_relation(rel_type) not in ontology_data['relation']:
-                    print('NOTYPE', rel_type, format_relation(rel_type))
+                    print('NOTYPE REL', rel_type, format_relation(rel_type))
                     continue
                 rel_offset = tabs[3]
                 rel_confidence = float(tabs[4])
@@ -528,14 +643,14 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
                 rel_type_qnode = ontology_data['relation'][format_relation(rel_type)]['qnode']
                 evt_info[rel_id]['type_qnode'][rel_type_qnode] = 1.0
                 
-                mention_str = ''
-                mention_type = ''
+                rel_mention_str = ''
+                rel_mention_type = ''
                 evt_info[rel_id]['confidence'] = float(tabs[4])
                 evt_info[rel_id]['canonical_mention'] = dict()
-                evt_info[rel_id]['canonical_mention'][doc_rel] = (mention_str, rel_offset)
+                evt_info[rel_id]['canonical_mention'][doc_rel] = (rel_mention_str, rel_offset)
                 evt_info[rel_id]['filetype'] = '%s' % (language)
                 evt_info[rel_id]['mention'] = dict()
-                evt_info[rel_id]['mention'][rel_offset] = (mention_confidence, mention_type, mention_str)   
+                evt_info[rel_id]['mention'][rel_offset] = (rel_confidence, rel_mention_type, rel_mention_str)   
 
                 arg_id = id_normalize(tabs[2], language)
                 evt_args[rel_id]['A0'][entity_id].append( (rel_offset, rel_offset, rel_confidence) )
@@ -564,8 +679,11 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
                 elif evt_type.split('.')[-1] in ontology_data['event_subtype']:
                     evt_type_qnode = ontology_data['event_subtype'][evt_type.split('.')[-1]]['qnode']
                     evt_info[evt_id]['type_qnode'][evt_type_qnode] = 1.0
+                elif evt_type in qnode_name_dict['event']:
+                    evt_type_qnode = qnode_name_dict['event'][evt_type]
+                    evt_info[evt_id]['type_qnode'][evt_type_qnode] = 0.9
                 else:
-                    print('NOTYPE', evt_type, evt_info[evt_id]['type'])
+                    print('NOTYPE Event ', evt_type, evt_info[evt_id]['type'])
             elif 'canonical_mention' in tabs[1]:
                 doc_id = load_canonical_mention(tabs, evt_info[evt_id], language, validate_offset)
                 # doc_ke[doc_id][ke_type].add(evt_id)
@@ -573,6 +691,14 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
                 mention_offset = load_mention(tabs, evt_info[evt_id], validate_offset)    
                 mention_doc_id, start, end = parse_offset_str(mention_offset)
                 doc_ke[mention_doc_id][ke_type].add(evt_id)
+                # check event Qnodes
+                mention_str = tabs[2][1:-1].lower()
+                if mention_str in qnode_name_dict['event']:
+                    evt_type_qnode_mapped = qnode_name_dict['event'][mention_str]
+                    if 'type_qnode' not in evt_info[evt_id]:
+                        evt_info[evt_id]['type_qnode'] = dict()
+                    evt_info[evt_id]['type_qnode'][evt_type_qnode_mapped] = 0.8
+                    # print('mapped event Qnodes', mention_str)
             elif len(tabs) > 3 and (tabs[2].startswith(':Entity') or tabs[2].startswith(':Filler_') or tabs[2].startswith(':Event_')):
                 role = tabs[1].split('#')[-1].replace(".actual", "").strip() # no other label than ".actual" for now
                 role_short = role.split('_')[-1]
@@ -586,13 +712,14 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
                 for type_qnode in evt_info[evt_id]['type_qnode']:
                     if role_short in ontology_data['event_arg'][type_qnode]:
                         evt_args_qnode[evt_id][role+'_qnode'] = ontology_data['event_arg'][type_qnode][role_short]
-                    roles_format = format_role(role_short).split('_')
+                    roles_format = format_role(' '+role_short+' ').split('_')
                     for role_format in roles_format:
+                        role_format = role_format.strip()
                         if role_format in ontology_data['event_arg'][type_qnode]:
                             evt_args_qnode[evt_id][role+'_qnode'] = ontology_data['event_arg'][type_qnode][role_format]
                             break
                     if role+'_qnode' not in evt_args_qnode[evt_id]: 
-                        print('NOTYPE', role_short, format_role(role_short), ontology_data['event_arg'][type_qnode].keys())
+                        print('NOTYPE Role', role_short, format_role(' '+role_short+' '), entity_info[arg_id]['canonical_mention'][doc_id][0], evt_id, arg_id, mention_offset, mention_str, type_qnode, ontology_data['event_arg'][type_qnode].keys())
             elif len(tabs) > 2 and tabs[1].startswith('t') and len(tabs[1]) == 2:
                 t_num = tabs[1]
                 date = tabs[2]
@@ -609,6 +736,17 @@ def load_cs(input_cs, ontology_data, language, validate_offset=False, single_typ
                 if 'time' not in evt_info[evt_id]: 
                     evt_info[evt_id]['time'] = [None, None, None, None]
                 evt_info[evt_id]['time'][num] = date
+            elif tabs[1] == 'polarity':
+                evt_info[evt_id]['polarity'] = tabs[2]
+            elif tabs[1] == 'modality':
+                evt_info[evt_id]['modality'] = tabs[2]
+            elif tabs[1] == 'genericity':
+                evt_info[evt_id]['genericity'] = tabs[2]
+            # POLARITY_TYPES = ['Negative', 'Positive']
+            # MODALITY_TYPES = ['Asserted', 'Other']
+            # GENERICITY_TYPES = ['Generic', 'Specific']
+            # TENSE_TYPES = ['Unspecified', 'Past', 'Future', 'Present']
+            # REALIS_TYPES = ['actual', 'generic', 'other']
 
     for entity_id in entity_info:
         if 'type' not in entity_info[entity_id]:
@@ -625,7 +763,7 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
             freebase_links=None, fine_grained_entity_dict=None, 
             offset_event_vec=None, offset_entity_vec=None, doc_id_to_root_dict=None,
             ltf_dir=None, event_embedding_from_file=False, eng_elmo=None, ukr_elmo=None, rus_elmo=None,
-            translation_mapping=None, only_qnode=True):
+            translation_mapping=None, str_mapping=None, only_qnode=True):
     LDC_namespace = Namespace(LDC.NAMESPACE)
     AIDA_namespace = Namespace(AIDA.NAMESPACE)
     CLAIM_namespace = Namespace('https://www.caci.com/claim-example#')
@@ -697,12 +835,12 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
             #     # aifutils.mark_private_data(g, max_type_assertion, json.dumps({'typeConfidence': 'canonical_type'}), system)
             entity_type_cs = entity_info[entity_id]['type']
             # print(entity_type_cs)
-            type_assertion_uri = URIRef("http://www.isi.edu/gaia/assertions/uiuc/entitytype/%s/%s/%s" % (doc_id, entity_id, entity_type_cs))
             for type_qnode_ in entity_info[entity_id]['type_qnode']:
+                type_assertion_uri = URIRef("http://www.isi.edu/gaia/assertions/uiuc/entitytype/%s/%s/%s/%s" % (doc_id, entity_id, entity_type_cs, type_qnode_))
                 type_qnode_confidence = entity_info[entity_id]['type_qnode'][type_qnode_]
                 type_asser = aifutils.mark_type(g, type_assertion_uri, ent, Literal(type_qnode_, datatype=XSD.string), system, type_qnode_confidence)
-            aifutils.mark_private_data(g, type_assertion_uri, json.dumps({'ldctype': entity_type_cs}), system)
-            entity_needs_justifications.add(type_asser)
+                aifutils.mark_private_data(g, type_assertion_uri, json.dumps({'ldctype': entity_type_cs}), system)
+                entity_needs_justifications.add(type_asser)
             max_type = entity_type_cs
             
             # add informative justification
@@ -744,21 +882,36 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
 
             # TODO
             # add hasName/textValue
-            if 'name' in entity_info[entity_id]:
-                try:
-                    if max_type.split('.')[0] in ['PER', 'ORG', 'GPE', 'FAC', 'LOC', 'WEA', 'VEH', 'LAW']:
-                        for name_str_ in entity_info[entity_id]['name']:
-                            aifutils.mark_name(g, ent, name_str_)
-                    if max_type.split('.')[0] in ['MHI', 'MON', ' RES', 'TTL', 'VAL']:
-                        for text_value_str_ in entity_info[entity_id]['name']:
-                            aifutils.mark_text_value(g, ent, text_value_str_)
-                except:
-                    if entity_type_cs.split('.')[0] in ['PER', 'ORG', 'GPE', 'FAC', 'LOC', 'WEA', 'VEH', 'LAW']:
-                        for name_str_ in entity_info[entity_id]['name']:
-                            aifutils.mark_name(g, ent, name_str_)
-                    if entity_type_cs.split('.')[0] in ['MHI', 'MON', ' RES', 'TTL', 'VAL']:
-                        for text_value_str_ in entity_info[entity_id]['name']:
-                            aifutils.mark_text_value(g, ent, text_value_str_)
+            # if 'name' in entity_info[entity_id]:
+            if 'hasName' in entity_info[entity_id] and entity_info[entity_id]['hasName'] == True:
+                # try:
+                if max_type.split('.')[0] in ['PER', 'ORG', 'GPE', 'FAC', 'LOC', 'WEA', 'VEH', 'LAW']:
+                    # for name_str_ in entity_info[entity_id]['name']:
+                    #     aifutils.mark_name(g, ent, name_str_)
+                    name_str_, offset_ = entity_info[entity_id]['canonical_mention'][doc_id]
+                    aifutils.mark_name(g, ent, name_str_)
+                    # add hasName
+                    if str_mapping is not None:
+                        if name_str_ in str_mapping:
+                            for str_raw in str_mapping[name_str_]:
+                                aifutils.mark_name(g, ent, str_raw)
+                if max_type.split('.')[0] in ['MHI', 'MON', ' RES', 'TTL', 'VAL']:
+                    # for text_value_str_ in entity_info[entity_id]['name']:
+                    #     aifutils.mark_text_value(g, ent, text_value_str_)
+                    text_value_str_, offset_ = entity_info[entity_id]['canonical_mention'][doc_id]
+                    aifutils.mark_text_value(g, ent, text_value_str_)
+                    # add hasName
+                    if str_mapping is not None:
+                        if text_value_str_ in str_mapping:
+                            for str_raw in str_mapping[text_value_str_]:
+                                aifutils.mark_text_value(g, ent, str_raw)
+                # except:
+                #     if entity_type_cs.split('.')[0] in ['PER', 'ORG', 'GPE', 'FAC', 'LOC', 'WEA', 'VEH', 'LAW']:
+                #         for name_str_ in entity_info[entity_id]['name']:
+                #             aifutils.mark_name(g, ent, name_str_)
+                #     if entity_type_cs.split('.')[0] in ['MHI', 'MON', ' RES', 'TTL', 'VAL']:
+                #         for text_value_str_ in entity_info[entity_id]['name']:
+                #             aifutils.mark_text_value(g, ent, text_value_str_)
 
             # add freebase link
             if freebase_links is not None:
@@ -818,7 +971,7 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                 # add cluster
                 evt_cluster = aifutils.make_cluster_with_prototype(g, "http://www.isi.edu/gaia/clusters/uiuc/%ss/%s/%s" % (ke_type, doc_id, evt_id),
                                                                     evt, system)
-                aifutils.mark_as_possible_cluster_member(g, evt, evt_cluster, 0.9, system)
+                aifutils.mark_as_possible_cluster_member(g, evt, evt_cluster, evt_info[evt_id]['confidence'], system)
                 
                 # add type assertions
                 evt_type_cs = evt_info[evt_id]['type']
@@ -827,15 +980,17 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                 if 'type_qnode' in evt_info[evt_id]:
                     for type_qnode_ in evt_info[evt_id]['type_qnode']:
                         evt_type_qnode = Literal(type_qnode_, datatype=XSD.string)
+                        type_confidence = evt_info[evt_id]['type_qnode'][type_qnode_]
+                        # confidence = evt_info[evt_id]['confidence']
+                        type_assertion_uri = URIRef("http://www.isi.edu/gaia/assertions/uiuc/%stype/%s/%s/%s/%s" % (ke_type, doc_id, evt_id, evt_type_cs,type_qnode_))
+                        type_asser = aifutils.mark_type(g, type_assertion_uri, evt, evt_type_qnode, system, type_confidence)
+                        aifutils.mark_private_data(g, type_assertion_uri, json.dumps({'ldctype': evt_type_cs}), system)
+                        # g.add( (evt, AIDA_namespace.componentIdentity, Literal(evt_info[evt_id]['type_qnode'], datatype=XSD.string)) )
                 else:
                     print('no type qnode for event', evt_type_cs)
                 # evt_type = LDC_namespace[evt_type_cs]
                 
-                confidence = evt_info[evt_id]['confidence']
-                type_assertion_uri = URIRef("http://www.isi.edu/gaia/assertions/uiuc/%stype/%s/%s/%s" % (ke_type, doc_id, evt_id, evt_type_cs))
-                type_asser = aifutils.mark_type(g, type_assertion_uri, evt, evt_type_qnode, system, confidence)
-                aifutils.mark_private_data(g, type_assertion_uri, json.dumps({'ldctype': evt_type_cs}), system)
-                # g.add( (evt, AIDA_namespace.componentIdentity, Literal(evt_info[evt_id]['type_qnode'], datatype=XSD.string)) )
+                
 
                 # add informative justification
                 write_informative_justification(g, evt_id, ke_type, evt, evt_info[evt_id], file_type, system, doc_id_to_root_dict=doc_id_to_root_dict,doc_id=doc_id,translation_mapping=translation_mapping)
@@ -845,6 +1000,8 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
 
                 # add roles
                 for role in evt_args[evt_id]:
+                    if role+'_qnode' not in evt_args_qnode[evt_id]:
+                        continue
                     subject_role = evt_args_qnode[evt_id][role+'_qnode'] #role #LDC_namespace[role]
                     for arg_id in evt_args[evt_id][role]:
                         # for arg_offset, arg_confidence in evt_args[evt_id][role][arg_id]:  ?????????
@@ -861,7 +1018,7 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                         role_justification_arg = aifutils.make_text_justification(g, role_doc_id, role_start,
                                                                                 role_end, system, arg_confidence)
                         aifutils.add_source_document_to_justification(g, role_justification_arg, doc_id_to_root_dict[role_doc_id])
-                        role_justification = aifutils.mark_compound_justification(g, role_asser, [role_justification_trigger, role_justification_arg], system, confidence)
+                        role_justification = aifutils.mark_compound_justification(g, role_asser, [role_justification_trigger, role_justification_arg], system, arg_confidence)
                         # add_filetype(g, role_justification, evt_info[evt_id]['filetype'])
 
                 # add temporal info
@@ -873,6 +1030,15 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                     endL = LDCTimeComponent(LDCTimeType.BEFORE, dates[3][0], dates[3][1], dates[3][2])
                     aifutils.mark_ldc_time_range(g, evt, startE, startL, endE, endL, system)
                 
+                # # add attributes
+                # if 'polarity' in evt_info[evt_id] and evt_info[evt_id]['polarity'] == 'Negative':
+                #     aifutils.mark_attribute(g, evt, interchange_ontology.Negated)
+                # if 'modality' in evt_info[evt_id] and evt_info[evt_id]['modality'] != 'Asserted':
+                #     aifutils.mark_attribute(g, evt, interchange_ontology.Hedged)
+                # # aifutils.mark_attribute(g, event, interchange_ontology.Irrealis)
+                # if 'genericity' in evt_info[evt_id] and evt_info[evt_id]['genericity'] == 'Generic':
+                #     aifutils.mark_attribute(g, evt, interchange_ontology.Generic)
+                 
                 # # add news source info
                 # if source_dict is not None and doc_id in source_dict:
                 #     evt_source_system = aifutils.make_system_with_uri(g, "http://www.uiuc.edu/news_source")
@@ -901,25 +1067,63 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
             claim_id = 'claim_%s_%s' % (doc_id, claim_idx)
             sent_start = claim_dict['start_char']
             sent_end = claim_dict['end_char']
-            claim_start = claim_dict['claim_span_start'] + sent_start
-            claim_end = claim_dict['claim_span_end'] + sent_start
-            if claim_end < claim_start:
-                claim_end = sent_end
+            sentence = claim_dict["sentence"]
+            # print('sentence', sent_start, sent_end, sentence)
+            # print('-----------')
             claim_x = claim_dict['x_variable']
-            claim_x_start = claim_dict['x_start'] + sent_start
-            claim_x_end = claim_dict['x_end'] + sent_start
+            claim_x_start = claim_dict['x_variable_start'] + sent_start # claim_dict['x_start'] + sent_start # 
+            claim_x_end = claim_dict['x_variable_end'] + sent_start - 1 # claim_dict['x_end'] + sent_start - 1 # 
+            # # assert claim_dict['x_variable'] == get_str_from_ltf(doc_id, claim_x_start, claim_x_end, ltf_dir)
+            # print('-----------------------')
+
             claimer_start = claim_dict['claimer_start']
             claimer_end = claim_dict['claimer_end']
-            if 'extracted_from' in claim_dict["claimer_debug"] and claim_dict["claimer_debug"]["extracted_from"] == "full document":
-                claimer_start = claim_dict["claimer_debug"]["full_doc_output"]["start"]
-                claimer_end = claim_dict["claimer_debug"]["full_doc_output"]["end"]
-            # if claimer_end != claimer_start + 
+            if ("claimer_debug" in claim_dict) and ('extracted_from' in claim_dict["claimer_debug"]):
+                if claim_dict["claimer_debug"]["extracted_from"] == "full document" and "full_doc_output" in claim_dict["claimer_debug"]:
+                    claimer_start = claim_dict["claimer_debug"]["full_doc_output"]["start"]
+                    claimer_end = claim_dict["claimer_debug"]["full_doc_output"]["end"]
+
+            if claim_dict['claim_span_start'] == 0:
+                claim_start = sent_start
+            else:
+                claim_start = claim_dict['claim_span_start'] + sent_start
+            if claim_dict['claim_span_end'] == 0:
+                claim_end = sent_end
+            else:
+                claim_end = claim_dict['claim_span_end'] + sent_start - 1
+            if claim_end < claim_start:
+                claim_end = sent_end
+                # print(str(claim_dict))
+            if len(claim_dict["claim_span_text"]) > 0:
+                claim_text = claim_dict["claim_span_text"]
+                # print(doc_id, claim_dict['claim_span_start'], claim_dict['claim_span_end'], claim_dict['claim_span_text'])
+                # print('-----------------------')
+                # add x_variable to claim span
+                if claim_x_start < claim_start:
+                    claim_start = claim_x_start
+                if claim_x_end > claim_end:
+                    claim_end = claim_x_end
+                # add claimer to claim span
+                if sent_start <= claimer_start and claimer_end <= sent_end:
+                    # if claimer is in the sentence, add claimer info into the description
+                    if claimer_start < claim_start:
+                        claim_start = claimer_start
+                    if claimer_end > claim_end:
+                        claim_end = claimer_end
+                claim_text = get_str_from_ltf(doc_id, claim_start, claim_end, ltf_dir)
+            else:
+                # no span, use the sentence
+                claim_text = sentence
+            # print('[final claim text]:', claim_text)
+            # print('===================')
+
+            
 
             claimer_text = claim_dict['claimer_text']
             if 'claimer_qnode' in claim_dict:
                 claimer_qnode = claim_dict['claimer_qnode']
-            else:
-                claimer_qnode = AIDA_namespace.none
+            # else:
+            #     claimer_qnode = AIDA_namespace.none
             claimer_id = '%s_claimer' % (claim_id)
 
             claim_dict['associated_KEs'] = list()
@@ -932,18 +1136,57 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
             claim_dict['claimer_ke_typeqnode'] = list()
             for ke_type in ['event', 'relation']:
                 for evt_id in doc_ke[doc_id][ke_type]:
+                    if len(evt_args[evt_id]) == 0:
+                        continue
                     evt_cluster_uri = "http://www.isi.edu/gaia/clusters/uiuc/%ss/%s/%s" % (ke_type, doc_id, evt_id)
                     # evt_uri = "http://www.isi.edu/gaia/%ss/uiuc/%s/%s" % (ke_type, doc_id, evt_id)
+                    evt_type = evt_info[evt_id]['type']
                     for offset in evt_info[evt_id]['mention']:
                         mention_confidence, mention_type, mention_str = evt_info[evt_id]['mention'][offset]
                         doc_id_mention, start_offset, end_offset = parse_offset_str(offset)
+                        # add events based on topics
+                        for topic_event_type in topic_type_map[claim_dict['sub_topic']]:
+                            if evt_type.startswith(topic_event_type):
+                                if len(evt_args[evt_id]) > 0:
+                                    if sent_start-500 <= start_offset and end_offset <= sent_end+500:
+                                        claim_dict['associated_KEs'].append( (evt_id, mention_str, evt_info[evt_id]['type'], offset, evt_cluster_uri, evt_args[evt_id]))
+                                        claim_dict['claim_semantics'].append( (evt_id, mention_str, evt_info[evt_id]['type'], offset, evt_cluster_uri, evt_args[evt_id]))
+                        # add events based on offset
                         if doc_id_mention == doc_id:
                             if sent_start-200 <= start_offset and end_offset <= sent_end+200:
                                 # g.add((CLAIM_namespace[claim_id], AIDA_namespace.associatedKEs, URIRef(evt_cluster_uri) ))
                                 claim_dict['associated_KEs'].append( (evt_id, mention_str, evt_info[evt_id]['type'], offset, evt_cluster_uri, evt_args[evt_id]))
-                            if claim_start-50 <= start_offset and end_offset <= claim_end+50:
+                            # if claim_start-1 <= start_offset and end_offset <= claim_end+1:
+                            if sent_start-100 <= start_offset and end_offset <= sent_end+100: # use sentence offset, since the claim span may not correct
                                 # g.add((CLAIM_namespace[claim_id], AIDA_namespace.claimSemantics, URIRef(evt_cluster_uri) ))
                                 claim_dict['claim_semantics'].append( (evt_id, mention_str, evt_info[evt_id]['type'], offset, evt_cluster_uri, evt_args[evt_id]))
+            if len(claim_dict['associated_KEs']) == 0:
+                for ke_type in ['event', 'relation']:
+                    for evt_id in doc_ke[doc_id][ke_type]:
+                        if len(evt_args[evt_id]) == 0:
+                            continue
+                        evt_cluster_uri = "http://www.isi.edu/gaia/clusters/uiuc/%ss/%s/%s" % (ke_type, doc_id, evt_id)
+                        # evt_uri = "http://www.isi.edu/gaia/%ss/uiuc/%s/%s" % (ke_type, doc_id, evt_id)
+                        evt_type = evt_info[evt_id]['type']
+                        for offset in evt_info[evt_id]['mention']:
+                            mention_confidence, mention_type, mention_str = evt_info[evt_id]['mention'][offset]
+                            doc_id_mention, start_offset, end_offset = parse_offset_str(offset)
+                            # add events based on topics
+                            for topic_event_type in topic_type_map[claim_dict['sub_topic']]:
+                                if evt_type.startswith(topic_event_type):
+                                    if len(evt_args[evt_id]) > 0:
+                                        if sent_start-900 <= start_offset and end_offset <= sent_end+900:
+                                            claim_dict['associated_KEs'].append( (evt_id, mention_str, evt_info[evt_id]['type'], offset, evt_cluster_uri, evt_args[evt_id]))
+                                            claim_dict['claim_semantics'].append( (evt_id, mention_str, evt_info[evt_id]['type'], offset, evt_cluster_uri, evt_args[evt_id]))
+                            # add events based on offset
+                            if doc_id_mention == doc_id:
+                                if sent_start-400 <= start_offset and end_offset <= sent_end+400:
+                                    # g.add((CLAIM_namespace[claim_id], AIDA_namespace.associatedKEs, URIRef(evt_cluster_uri) ))
+                                    claim_dict['associated_KEs'].append( (evt_id, mention_str, evt_info[evt_id]['type'], offset, evt_cluster_uri, evt_args[evt_id]))
+                                # if claim_start-1 <= start_offset and end_offset <= claim_end+1:
+                                if sent_start-200 <= start_offset and end_offset <= sent_end+200: # use sentence offset, since the claim span may not correct
+                                    # g.add((CLAIM_namespace[claim_id], AIDA_namespace.claimSemantics, URIRef(evt_cluster_uri) ))
+                                    claim_dict['claim_semantics'].append( (evt_id, mention_str, evt_info[evt_id]['type'], offset, evt_cluster_uri, evt_args[evt_id]))
             for ent_id in doc_ke[doc_id]['entity']:
                 ent_uri = "http://www.isi.edu/gaia/entities/uiuc/%s/%s" % (doc_id, ent_id)
                 ent_cluster_uri = "http://www.isi.edu/gaia/clusters/uiuc/entity/%s/%s" % (doc_id, ent_id)
@@ -951,14 +1194,23 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                     mention_confidence, mention_type, mention_str = entity_info[ent_id]['mention'][offset]
                     doc_id_mention, start_offset, end_offset = parse_offset_str(offset)
                     if doc_id_mention == doc_id:
+                        # if 'covid' in mention_str.lower():
+                        #     claim_dict['associated_KEs'].append( (ent_id, mention_str, entity_info[ent_id]['type'], offset, ent_cluster_uri, "") )
+                        #     claim_dict['claim_semantics'].append( (ent_id, mention_str, entity_info[ent_id]['type'], offset, ent_cluster_uri, "") )
+                        
                         # associated_KEs
-                        if sent_start-200 <= start_offset and end_offset <= sent_end+200:
+                        if sent_start-10 <= start_offset and end_offset <= sent_end+10:
                             # g.add((CLAIM_namespace[claim_id], AIDA_namespace.associatedKEs, URIRef(ent_cluster_uri) ))
                             claim_dict['associated_KEs'].append( (ent_id, mention_str, entity_info[ent_id]['type'], offset, ent_cluster_uri, "") )
                         # claim_semantics
-                        if claim_start-50 <= start_offset and end_offset <= claim_end+50:
-                            # g.add((CLAIM_namespace[claim_id], AIDA_namespace.claimSemantics, URIRef(ent_cluster_uri) ))
-                            claim_dict['claim_semantics'].append( (ent_id, mention_str, entity_info[ent_id]['type'], offset, ent_cluster_uri, "") )
+                        if claim_start-1 <= start_offset and end_offset <= claim_end+1:
+                            # remove claimer
+                            if (claimer_start <= start_offset and end_offset <= claimer_end) or ( start_offset <= claimer_start and claimer_end <= end_offset): # offset overlap
+                                # remove claimer from the claim semantics
+                                continue
+                            else:
+                                # g.add((CLAIM_namespace[claim_id], AIDA_namespace.claimSemantics, URIRef(ent_cluster_uri) ))
+                                claim_dict['claim_semantics'].append( (ent_id, mention_str, entity_info[ent_id]['type'], offset, ent_cluster_uri, "") )
                         # x
                         if (claim_x_start <= start_offset and end_offset <= claim_x_end) or ( start_offset <= claim_x_start and claim_x_end <= end_offset): # offset overlap
                             claim_dict['x_ke'].append( (ent_id, mention_str, offset, ent_uri) )
@@ -966,11 +1218,75 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                                 claim_dict['x_ke_qnode'].extend(entity_info[ent_id]['link'].keys())
                             if 'type_qnode' in entity_info[ent_id]:
                                 claim_dict['x_ke_typeqnode'].extend(entity_info[ent_id]['type_qnode'].keys())
+                            # add to claim semantics
+                            claim_dict['claim_semantics'].append( (ent_id, mention_str, entity_info[ent_id]['type'], offset, ent_cluster_uri, "") )
                         # claimer
                         if (claimer_start <= start_offset and end_offset <= claimer_end) or ( start_offset <= claimer_start and claimer_end <= end_offset): # offset overlap
                             claim_dict['claimer_ke'].append( (ent_id, mention_str, offset, ent_uri) )
                             claim_dict['claimer_ke_qnode'].extend(entity_info[ent_id]['link'].keys())
                             claim_dict['claimer_ke_typeqnode'].extend(entity_info[ent_id]['type_qnode'].keys())
+            # if len(claim_dict['associated_KEs']) == 0:
+            #     # if no associated_KEs, extend the span of the claim:
+            #     for ent_id in doc_ke[doc_id]['entity']:
+            #         ent_uri = "http://www.isi.edu/gaia/entities/uiuc/%s/%s" % (doc_id, ent_id)
+            #         ent_cluster_uri = "http://www.isi.edu/gaia/clusters/uiuc/entity/%s/%s" % (doc_id, ent_id)
+            #         for offset in entity_info[ent_id]['mention']:
+            #             mention_confidence, mention_type, mention_str = entity_info[ent_id]['mention'][offset]
+            #             doc_id_mention, start_offset, end_offset = parse_offset_str(offset)
+            #             if doc_id_mention == doc_id:
+            #                 # associated_KEs
+            #                 if sent_start-450 <= start_offset and end_offset <= sent_end+450:
+            #                     # g.add((CLAIM_namespace[claim_id], AIDA_namespace.associatedKEs, URIRef(ent_cluster_uri) ))
+            #                     claim_dict['associated_KEs'].append( (ent_id, mention_str, entity_info[ent_id]['type'], offset, ent_cluster_uri, "") )
+            #                 # claim_semantics
+            #                 if claim_start-250 <= start_offset and end_offset <= claim_end+250:
+            #                     # remove claimer
+            #                     if (claimer_start <= start_offset and end_offset <= claimer_end) or ( start_offset <= claimer_start and claimer_end <= end_offset): # offset overlap
+            #                         # remove claimer from the claim semantics
+            #                         continue
+            #                     else:
+            #                         # g.add((CLAIM_namespace[claim_id], AIDA_namespace.claimSemantics, URIRef(ent_cluster_uri) ))
+            #                         claim_dict['claim_semantics'].append( (ent_id, mention_str, entity_info[ent_id]['type'], offset, ent_cluster_uri, "") )
+            
+            # add arguments
+            for evt_id, _, _, _, _, _ in claim_dict['associated_KEs']:
+                if 'Event' in evt_id:
+                    for role in evt_args[evt_id]:
+                        for arg_id in evt_args[evt_id][role]:
+                            saved = False
+                            for ent_id, _, _, _, _, _ in claim_dict['associated_KEs']:
+                                if arg_id == ent_id:
+                                    saved = True
+                                    break
+                            if saved:
+                                continue
+                            trigger_arg_offset, arg_offset, arg_confidence = evt_args[evt_id][role][arg_id][0]
+                            arg_uri = "http://www.isi.edu/gaia/entities/uiuc/%s/%s" % (doc_id, arg_id)
+                            arg_cluster_uri = "http://www.isi.edu/gaia/clusters/uiuc/entity/%s/%s" % (doc_id, arg_id)
+                            doc_id_mention, start_offset, end_offset = parse_offset_str(arg_offset)
+                            if doc_id_mention == doc_id:
+                                claim_dict['associated_KEs'].append( (arg_id, entity_info[arg_id]['canonical_mention'][doc_id][0], entity_info[arg_id]['type'], arg_offset, arg_cluster_uri, "") )
+            for evt_id, _, _, _, _, _ in claim_dict['claim_semantics']:
+                if 'Event' in evt_id:
+                    for role in evt_args[evt_id]:
+                        for arg_id in evt_args[evt_id][role]:
+                            saved = False
+                            for ent_id, _, _, _, _, _ in claim_dict['claim_semantics']:
+                                if arg_id == ent_id:
+                                    saved = True
+                                    break
+                            if saved:
+                                continue
+                            trigger_arg_offset, arg_offset, arg_confidence = evt_args[evt_id][role][arg_id][0]
+                            arg_uri = "http://www.isi.edu/gaia/entities/uiuc/%s/%s" % (doc_id, arg_id)
+                            arg_cluster_uri = "http://www.isi.edu/gaia/clusters/uiuc/entity/%s/%s" % (doc_id, arg_id)
+                            doc_id_mention, start_offset, end_offset = parse_offset_str(arg_offset)
+                            if doc_id_mention == doc_id:
+                                claim_dict['claim_semantics'].append( (arg_id, entity_info[arg_id]['canonical_mention'][doc_id][0], entity_info[arg_id]['type'], arg_offset, arg_cluster_uri, "") )
+
+            if len(claim_dict['claim_semantics']) == 0:
+                # if no semantics is extracted, add all the possible KEs from associated_KEs
+                claim_dict['claim_semantics'] = claim_dict['associated_KEs']
             if len(claim_dict['x_ke_qnode']) == 0:
                 if claim_x in qnode_dict:
                     claim_dict['x_ke_qnode'].append(qnode_dict[claim_x]['qnode'].most_common()[0][0])
@@ -1002,8 +1318,6 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
             if len(claim_dict['claim_semantics']) == 0 or len(claim_dict['associated_KEs']) == 0:
                 continue
 
-            claim_text = claim_dict["claim_span_text"]
-            sentence = claim_dict["sentence"]
             claim_topic = claim_dict['topic']
             claim_confidence = float(claim_dict['claimbuster_score'])
             
@@ -1012,15 +1326,33 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
             claimObject.importance = claim_confidence
             claimObject.claimId = claim_id
             # claimObject.queryId = "QueryId:1776"
-            claimObject.claimTemplate = claim_dict['template']
+            if 'template' in claim_dict:
+                claimObject.claimTemplate = claim_dict['template']
+            elif 'subtopic_question' in claim_dict:
+                claimObject.claimTemplate = claim_dict['subtopic_question']
             claimObject.naturalLanguageDescription = claim_text
             # g.add((CLAIM_namespace[claim_id], AIDA_namespace.claimText, Literal(claim_text, datatype=XSD.string) ))
             claimObject.topic = claim_topic
             claimObject.subtopic = claim_dict['sub_topic']
             claimObject.sourceDocument = root_doc_id
-            # aifutils.mark_private_data(g, CLAIM_namespace[claim_id], json.dumps({'topic_confidence':claim_dict['topic_scores'], 'claim_confidence': claim_confidence, 'claimer_score':claim_dict['claimer_debug']['sent_output']['score'], 'sentence':sentence, 'source':doc_id, 'sourceDocument':root_doc_id, 'startOffset': claim_start, 'endOffsetInclusive': claim_end}), claim_system)
-            aifutils.mark_text_justification(g, [CLAIM_namespace[claim_id]], doc_id, claim_start,
-                                                                                    claim_end, claim_system, claim_confidence)
+            new_claim_start, new_claim_end = transoffset_mapping(doc_id, claim_start, claim_end, translation_mapping)
+            justification_aif = aifutils.mark_text_justification(g, [CLAIM_namespace[claim_id]], doc_id, new_claim_start,
+                                                                                    new_claim_end, claim_system, claim_confidence)
+            justification_aif = aifutils.add_source_document_to_justification(g, justification_aif, root_doc_id)
+            # print('doc_id, claim_start, claim_end', doc_id, claim_start, claim_end)
+            sentence_before, sent, sentence_after = get_context_sentences(doc_id, claim_start, claim_end, ltf_dir)
+            # print('sentence', sentence)
+            # print('sent', sent)
+            assert sentence == sent
+            aifutils.mark_private_data(g, justification_aif, json.dumps({
+                'final_claim_score': claim_dict['topic_score'],
+                'source':doc_id, 
+                'sourceDocument':root_doc_id, 'startOffset_translation': claim_start, 'endOffsetInclusive_translation': claim_end,
+                'startOffset': new_claim_start, 'endOffsetInclusive': new_claim_end,
+                'sentence':sentence, 
+                'sentence_before': sentence_before, 
+                'sentence_after': sentence_after, 
+                }), claim_system)
             
             
             if 'qnode_x_variable_identity' in claim_dict:
@@ -1041,15 +1373,28 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                     x_var_component.setIdentity= claim_dict['x_ke_qnode'][0] #entity_info[x_varible_ke]['link']
                 else:
                     x_var_component.setIdentity= claim_x_qnode
-            if only_qnode:
-                x_var_component.addType    = claim_dict['qnode_x_variable_type']
-            else:
-                for type_node_ in claim_dict['x_ke_typeqnode']:
-                    x_var_component.addType    = type_node_ #entity_info[x_varible_ke]['type_qnode']
-                if 'qnode_x_variable_type' in claim_dict:
-                    x_var_component.addType    = claim_dict['qnode_x_variable_type']
-            # if len(claim_dict['x_ke_typeqnode']) == 0 and 'qnode_x_variable_type' not in claim_dict:
-            #     x_var_component.addType    = AIDA_namespace.none
+            # if only_qnode:
+            #     x_var_component.addType    = claim_dict['qnode_x_variable_type']
+            # else:
+            #     for type_node_ in claim_dict['x_ke_typeqnode']:
+            #         x_var_component.addType    = type_node_ #entity_info[x_varible_ke]['type_qnode']
+            #     if 'qnode_x_variable_type' in claim_dict:
+            #         x_var_component.addType    = claim_dict['qnode_x_variable_type']
+            x_typenodes = set()
+            if claim_x.lower() in qnode_dict['entity']:
+                # if can directly matched to xpo, use the type from xpo
+                x_type_qnode_dict = qnode_dict['entity'][claim_x.lower()]
+                # if it is same as identity qnode, exclude it
+                if x_type_qnode_dict != claim_dict['qnode_x_variable_identity']:
+                    x_var_component.addType   = x_type_qnode_dict
+                    x_typenodes.add(x_type_qnode_dict)
+            # if len(x_typenodes) == 0:
+            #     # otherwise cannot be mapped using the xpo names, use Tuan's result
+            x_var_component.addType   = claim_dict['qnode_x_variable_type'] # always have Tuan's type Qnode?
+            # get all possible type nodes
+            x_typenodes.add(claim_dict['qnode_x_variable_type'])
+            for type_node_ in claim_dict['x_ke_typeqnode']:
+                x_typenodes.add(type_node_ )        
             x_var_component.setProvenance  = sentence
             if len(claim_dict['x_ke']) > 0:
                 x_varible_ke = URIRef(claim_dict['x_ke'][-1][3])
@@ -1057,10 +1402,11 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
             x_var_component_aif = aifutils.make_claim_component(g, (CLAIM_namespace[x_varible_id]), x_var_component, claim_system)
             claimObject.addXVariable = x_var_component_aif
             aifutils.mark_private_data(g, x_var_component_aif, json.dumps({
+                'x_variable_type_qnode': list(x_typenodes), 
                 # 'topic_confidence':claim_dict['topic_scores'], 
                 'claimbuster_score': claim_dict['claimbuster_score'], 
                 'final_claim_score': claim_dict['final_claim_score'],
-                'claimer_score':claim_dict['claimer_debug']['sent_output']['score'], 
+                'claimer_score': claim_dict['claimer_debug']['score'],  # claim_dict['claimer_debug']['sent_output']['score'], # 
                 'sentence':sentence, 
                 'source':doc_id, 
                 'sourceDocument':root_doc_id, 'startOffset': claim_start, 'endOffsetInclusive': claim_end
@@ -1077,15 +1423,29 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                     claimer_component.setIdentity    = claim_dict['claimer_ke_qnode'][0] #entity_info[claimer_ke]['link']
                 else:
                     claimer_component.setIdentity    = claimer_qnode
-            if only_qnode:
-                claimer_component.addType    = claim_dict['claimer_type_qnode']
-            else:
-                for type_node_ in claim_dict['claimer_ke_typeqnode']:
-                    claimer_component.addType    = type_node_ 
-                if 'claimer_type_qnode' in claim_dict:
-                    claimer_component.addType    = claim_dict['claimer_type_qnode']
-                # if len(claim_dict['claimer_ke_typeqnode']) == 0 and 'claimer_type_qnode' not in claim_dict:
-                #     claimer_component.addType    = AIDA_namespace.none
+            # if only_qnode:
+            #     claimer_component.addType    = claim_dict['claimer_type_qnode']
+            # else:
+            #     for type_node_ in claim_dict['claimer_ke_typeqnode']:
+            #         claimer_component.addType    = type_node_ 
+            #     if 'claimer_type_qnode' in claim_dict:
+            #         claimer_component.addType    = claim_dict['claimer_type_qnode']
+            claimer_typenodes = set()
+            if claimer_text.lower() in qnode_dict['entity']:
+                # if can directly matched to xpo, use the type from xpo
+                claimer_type_qnode_dict = qnode_dict['entity'][claimer_text.lower()]
+                # if it is same as identity qnode, exclude it
+                if claimer_type_qnode_dict != claim_dict['claimer_qnode']:
+                    claimer_component.addType   = claimer_type_qnode_dict
+                    claimer_typenodes.add(claimer_type_qnode_dict)
+            # if len(claimer_typenodes) == 0:
+            #     # otherwise cannot be mapped using the xpo names, use Tuan's result
+            claimer_component.addType   = claim_dict['claimer_type_qnode'] # always have Tuan's type Qnode?
+            # get all possible type nodes
+            claimer_typenodes.add(claim_dict['claimer_type_qnode'])
+            for type_node_ in claim_dict['claimer_ke_typeqnode']:
+                claimer_typenodes.add(type_node_ )        
+            
             claimer_component.setProvenance  = sentence
             if len(claim_dict['claimer_ke']) > 0:
                 claimer_ke = URIRef(claim_dict['claimer_ke'][-1][3])
@@ -1112,8 +1472,12 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                         claimObject.addClaimerAffiliation = affiliation_component_aif
             claimer_component_aif = aifutils.make_claim_component(g, CLAIM_namespace[claimer_id], claimer_component, claim_system)
             claimObject.claimer = claimer_component_aif
-            aifutils.mark_private_data(g, claimer_component_aif, json.dumps({'claimer_score':claim_dict['claimer_debug']['sent_output']['score']}), claim_system)
-            
+            aifutils.mark_private_data(g, claimer_component_aif, json.dumps({
+                'claimer_type_qnode':list(claimer_typenodes), 
+                'claimer_score': claim_dict['claimer_debug']['score'] # claim_dict['claimer_debug']['sent_output']['score'] # 
+                }
+            ), 
+            claim_system) 
             
             
             # claimObject.claimMedium = validMediumClaimComponent
@@ -1155,6 +1519,10 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
 
             times_0, times_1, times_2, times_3 = Counter(), Counter(), Counter(), Counter()
             for evt_id in related_events:
+                # startE = LDCTimeComponent(LDCTimeType.AFTER, None, None, None)
+                # startL = LDCTimeComponent(LDCTimeType.BEFORE, None, None, None)
+                # endE = LDCTimeComponent(LDCTimeType.AFTER, None, None, None)
+                # endL = LDCTimeComponent(LDCTimeType.BEFORE, None, None, None)
                 # #LDCTimeComponent
                 if 'time' in evt_info[evt_id]:
                     dates = evt_info[evt_id]['time']
@@ -1167,25 +1535,25 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
                     if dates[3][0] is not None:
                         times_3[dates[3]] += 1
                 if len(times_0) > 0:
-                    time = times_0.most_common()[0][0]
-                    startE = LDCTimeComponent(LDCTimeType.AFTER, time[0], time[1], time[2])
+                    time_0 = times_0.most_common()[0][0]
+                    startE = LDCTimeComponent(LDCTimeType.AFTER, time_0[0], time_0[1], time_0[2])
                     claim_dict['time_start_earliest'] = startE
                 if len(times_1) > 0:
-                    time = times_1.most_common()[0][0]
-                    startL = LDCTimeComponent(LDCTimeType.BEFORE, time[0], time[1], time[2])
+                    time_1 = times_1.most_common()[0][0]
+                    startL = LDCTimeComponent(LDCTimeType.BEFORE, time_1[0], time_1[1], time_1[2])
                     claim_dict['time_start_latest'] = startL
                 if len(times_2) > 0:
-                    time = times_2.most_common()[0][0]
-                    endE = LDCTimeComponent(LDCTimeType.AFTER, time[0], time[1], time[2])
+                    time_2 = times_2.most_common()[0][0]
+                    endE = LDCTimeComponent(LDCTimeType.AFTER, time_2[0], time_2[1], time_2[2])
                     claim_dict['time_end_earliest'] = endE
                 if len(times_3) > 0:
-                    time = times_3.most_common()[0][0]
-                    endL = LDCTimeComponent(LDCTimeType.BEFORE, time[0], time[1], time[2])
+                    time_3 = times_3.most_common()[0][0]
+                    # setting end_before = start_after if end_before < start_after.
+                    if len(times_0) > 0:
+                        if '%s-%s-%s' % (time_3[0], time_3[1], time_3[2]) < '%s-%s-%s' % (time_0[0], time_0[1], time_0[2]):
+                            time_3 = time_0
+                    endL = LDCTimeComponent(LDCTimeType.BEFORE, time_3[0], time_3[1], time_3[2])
                     claim_dict['time_end_latest'] = endL
-                #     startE = LDCTimeComponent(LDCTimeType.AFTER, dates[0][0], dates[0][1], dates[0][2])
-                #     startL = LDCTimeComponent(LDCTimeType.BEFORE, dates[1][0], dates[1][1], dates[1][2])
-                #     endE = LDCTimeComponent(LDCTimeType.AFTER, dates[2][0], dates[2][1], dates[2][2])
-                #     endL = LDCTimeComponent(LDCTimeType.BEFORE, dates[3][0], dates[3][1], dates[3][2])
                 claimObject.claimDateTime = aifutils.make_ldc_time_range(g, startE, startL, endE, endL, claim_system)
                 
             aifutils.make_claim(g, CLAIM_namespace[claim_id], claimObject, claim_system)
@@ -1194,7 +1562,7 @@ def gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode,
             claim_data_new[doc_id].append(claim_dict)
             
 
-        # g.serialize(destination=os.path.join(output_ttl_dir, root_doc_id+'.ttl'), format='ttl')
+        g.serialize(destination=os.path.join(output_ttl_dir, root_doc_id+'.ttl'), format='ttl')
 
         # break
 
@@ -1239,6 +1607,9 @@ if __name__=='__main__':
                         help='claim json')
     parser.add_argument('--trans_json', type=str, default=None, required=False,
                         help='trans2raw json')
+    parser.add_argument('--str_mapping_file', type=str, default=None, required=False,
+                        help='string translation mapping txt')
+    
 
     args = parser.parse_args()
 
@@ -1263,6 +1634,7 @@ if __name__=='__main__':
     fine_grained_entity_type_path = args.fine_grained_entity_type_path
     parent_child_tab_path = args.parent_child_tab_path
     trans_json = args.trans_json
+    str_mapping_file = args.str_mapping_file
     
 
     # AIDA = Namespace('https://tac.nist.gov/tracks/SM-KBP/2019/ontologies/InterchangeOntology#')
@@ -1272,15 +1644,18 @@ if __name__=='__main__':
     # LDC_uri = URIRef(prefix_ldc[args.eval])
     SKOS = ClosedNamespace(uri=URIRef('http://www.w3.org/2004/02/skos/core#'), terms=['prefLabel'])
     
-    ontology_data = load_xpo(args.overlay)
+    ontology_data, qnode_name_dict = load_xpo(args.overlay)
     if trans_json is None:
         translation_mapping = None
+        str_mapping = None
     else:
         if os.path.exists(trans_json):
             translation_mapping = json.load(open(trans_json))
+            str_mapping = get_translation_mapping(str_mapping_file)
         else:
             translation_mapping = None
-    doc_ke, entity_info, evt_info, evt_args, evt_args_qnode, qnode_dict = load_cs(input_cs, ontology_data, language, validate_offset, single_type=single_type)
+            str_mapping = None
+    doc_ke, entity_info, evt_info, evt_args, evt_args_qnode, qnode_dict = load_cs(input_cs, ontology_data, qnode_name_dict, language, validate_offset, single_type=single_type)
     dirname = os.path.dirname(input_cs)
     json.dump(doc_ke, open(os.path.join(dirname, 'doc_ke.json'), 'w'), indent=4)
     json.dump(entity_info, open(os.path.join(dirname, 'entity_info.json'), 'w'), indent=4)
@@ -1337,4 +1712,4 @@ if __name__=='__main__':
 
     gen_ttl(claim_data, doc_ke, entity_info, evt_info, evt_args, evt_args_qnode, qnode_dict, SKOS, output_ttl_dir, evt_coref_score=evt_coref_score, source_dict=source_dict, freebase_links=freebase_links, fine_grained_entity_dict=fine_grained_entity_dict, # lorelei_links=lorelei_links, 
             offset_event_vec=offset_event_vec, offset_entity_vec=offset_entity_vec, doc_id_to_root_dict=doc_id_to_root_dict, ltf_dir=ltf_dir, event_embedding_from_file=event_embedding_from_file, eng_elmo=eng_elmo, ukr_elmo=ukr_elmo, rus_elmo=rus_elmo,
-            translation_mapping=translation_mapping, only_qnode=True)
+            translation_mapping=translation_mapping, str_mapping=str_mapping, only_qnode=True)
