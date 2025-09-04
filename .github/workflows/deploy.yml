@@ -15,17 +15,22 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
 
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
     - name: Setup Node.js
       uses: actions/setup-node@v3
       with:
         node-version: '16'
-        cache: 'npm'
-        cache-dependency-path: demo/frontend/package-lock.json
 
     - name: Install dependencies
       run: |
         cd demo/frontend
-        npm ci
+        npm config set registry https://registry.npmjs.org/
+        rm -f package-lock.json
+        npm install
 
     - name: Build
       run: |
