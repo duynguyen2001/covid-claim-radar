@@ -1,0 +1,71 @@
+# COVID-19 Claim Radar - Project Context
+
+## Project Overview
+This is the COVID-19 Claim Radar project - a structured claim extraction and tracking system that automatically extracts claims relating to COVID-19 in news articles.
+
+## Frontend Setup
+- **Framework**: Vue.js 2.6.10
+- **UI Library**: Element UI, Bootstrap Vue  
+- **Build Tool**: Vue CLI
+- **Location**: `demo/frontend/`
+
+## GitHub Pages Deployment
+- **Configured**: Vue.js build configured for GitHub Pages deployment
+- **Public Path**: Set to `/covid-claim-radar/` for GitHub Pages
+- **Build Output**: `dist/` directory
+- **Deployment Script**: `demo/frontend/deploy.sh` (manual deployment)
+- **GitHub Actions**: Automated deployment on push to main branch via `.github/workflows/deploy.yml`
+
+## Environment Setup
+- **Node.js**: Version 16+ recommended
+- **Package Manager**: npm
+- **Dependencies**: Install with `npm ci` in frontend directory
+
+## Deployment Commands
+### Manual Deployment:
+```bash
+cd demo/frontend
+npm run build
+./deploy.sh
+```
+
+### Automated Deployment:
+- Push to main branch triggers GitHub Actions
+- Builds and deploys automatically to gh-pages branch
+- Only triggers on changes to `demo/frontend/**` files
+
+## Development Commands
+```bash
+cd demo/frontend
+npm install          # Install dependencies
+npm run serve        # Development server (localhost:8080)
+npm run build        # Production build
+npm run lint         # Lint code
+npm run test:unit    # Run tests
+```
+
+## Project Structure
+- `api/`: Backend API code
+- `claim_detection/`: Claim detection system
+- `knowledge_extraction/`: Knowledge extraction system  
+- `demo/frontend/`: Vue.js frontend application
+- `demo/backend/`: Go backend server
+- `data/`: Sample data and test files
+- `.github/workflows/`: GitHub Actions CI/CD
+
+## Live Demos
+- Claim Radar Demo: https://blenderdemo.com/covid-list
+- Ukraine Radar Demo: https://blenderdemo.com/ukraine-list
+- Real Time Extraction: https://blenderdemo.com/covid-extract
+
+## GitHub Pages Setup Complete
+- ✅ Vue.js configured for GitHub Pages
+- ✅ GitHub Actions workflow created
+- ✅ Deployment script ready
+- ✅ All files staged for commit
+
+## Next Steps
+1. Commit and push changes to GitHub
+2. Enable GitHub Pages in repository settings
+3. Set source to "gh-pages" branch
+4. Access your deployed app at: https://[username].github.io/covid-claim-radar/
