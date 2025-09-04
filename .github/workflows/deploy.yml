@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     
     steps:
     - name: Checkout
@@ -18,7 +18,7 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '2.7'
+        python-version: '3.8'
 
     - name: Setup Node.js
       uses: actions/setup-node@v3
@@ -30,7 +30,9 @@ jobs:
         cd demo/frontend
         npm config set registry https://registry.npmjs.org/
         rm -f package-lock.json
-        npm install
+        export SASS_BINARY_SITE=https://github.com/sass/node-sass/releases/download
+        export SASS_BINARY_NAME=linux-x64-83_binding.node
+        npm install --unsafe-perm
 
     - name: Build
       run: |
