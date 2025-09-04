@@ -15,24 +15,8 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: demo/frontend/package-lock.json
-
-    - name: Install dependencies
-      run: |
-        cd demo/frontend
-        npm config set registry https://registry.npmjs.org/
-        rm -f package-lock.json
-        npm install
-
-    - name: Build
-      run: |
-        cd demo/frontend
-        npm run build
+    - name: Deploy pre-built files
+      run: echo "Using pre-built files from demo/frontend/dist"
 
     - name: Deploy to GitHub Pages
       uses: peaceiris/actions-gh-pages@v3
